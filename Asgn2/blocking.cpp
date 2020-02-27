@@ -14,11 +14,9 @@ return a ;
 void mult(double **A , double ** B , double ** C , int RA , int CA , int CB){
     for(int i = 0 ; i < RA ; i++){
       for(int j = 0 ; j < CB ; j++ ){
-        double lsum=0;
         for(int k = 0 ; k < CA; k++){
-          lsum+=A[i][k]*B[k][j];
+         C[i][j]+=A[i][k]*B[k][j];
         }
-        C[i][j]=lsum;
       }
     }
 }
@@ -42,7 +40,6 @@ void mult_block(double **A , double ** B , double ** C , int RA , int CA , int C
                     C[i][j+7]+=A[i][k]*B[k][j+7];
                     
               }
-              //C[i][j]+=lsum;
             }
           }
         }
@@ -61,7 +58,7 @@ double diff(double **A1, double **A2,int RA , int CA){
 
 int main(){
 
-  int n = 2048;
+  int n = 1024;
   int RA,RB,CA,CB;
   RA=RB=CA=CB=n;
   double start , end ;
@@ -101,7 +98,7 @@ int main(){
   }
 
   
-  printf("A matrix \n");
+  printf("Initialising A matrix \n");
   for(int i = 0 ; i < RA ; i++){
     for(int j = 0 ; j < CA;j++){
       A[i][j]=(i+2*j)/1000;
@@ -110,7 +107,7 @@ int main(){
     //printf("\n");
   }
 
-  printf("B matrix \n");
+  printf("initialising B matrix \n");
   for(int i = 0 ; i < RB ; i++){
     for(int j = 0 ; j < CB;j++){
       B[i][j]=i+3*j;
@@ -136,24 +133,6 @@ int main(){
    
     //process 0 does its share of computation
     mult_block(A,B,C,chunk,CA,CB);
-   // for(int i = 0 ; i < chunk ; i++){
-   //   for(int j = 0 ; j < CB ; j++ ){
-   //     double lsum = 0;
-   //     for(int k = 0 ; k < CA; k++){
-   //       lsum+=A[i][k]*B[k][j];
-   //     }
-   //       C[i][j]=lsum;  
-   //   }
-   // }
-
-    for(int i = 0 ; i < chunk;i++){
-      for(int j = 0 ; j < CB ; j++){
-        //printf("%d ",(int)C[i][j]);
-      }
-      //printf("\n");
-    }
-
-
   }
 
   else{
@@ -205,24 +184,15 @@ int main(){
     MPI_Recv(B_LOCAL[0],CB*RB,MPI_DOUBLE,0,MASTER_TO_SLAVE_TAG+3,MPI_COMM_WORLD,&status);
 
 
-    //code for matrix multiplication
-   // for(int i = 0 ; i < chunk ; i++){
-   //   for(int j = 0 ; j < CB ; j++ ){
-   //     double lsum =0;
-   //     for(int k = 0 ; k < CA; k++){
-   // //      C_LOCAL[i][j]+=A_LOCAL[i][k]*B_LOCAL[k][j];
-   //       lsum+=A_LOCAL[i][k]*B_LOCAL[k][j];
-   //     }
-   //       C_LOCAL[i][j]=lsum;  
-   //   } 
-   // }
     mult_block(A_LOCAL,B_LOCAL,C_LOCAL,chunk,CA,CB);
     /*Slave processes send their computation to Master Process 0*/
     MPI_Send(&Lb,1,MPI_INT,0,SLAVE_TO_MASTER_TAG,MPI_COMM_WORLD);
     MPI_Send(&Ub,1,MPI_INT,0,SLAVE_TO_MASTER_TAG+1,MPI_COMM_WORLD);
     MPI_Send(C_LOCAL[0],chunk*CB,MPI_DOUBLE,0,SLAVE_TO_MASTER_TAG+2,MPI_COMM_WORLD);
 
-
+    free(A_LOCAL);
+    free(B_LOCAL);
+    free(C_LOCAL);
 
 
   }
@@ -240,16 +210,6 @@ int main(){
       MPI_Recv(C[Lb],(Ub-Lb)*CB,MPI_DOUBLE,i,SLAVE_TO_MASTER_TAG+2,MPI_COMM_WORLD,&status);
     }
   
-
-    //print the output
-  printf("Final Ouput\n");
-  for(int i = 0 ; i < RA ; i++){
-    for(int j = 0 ; j < CB ; j++){
-      //printf("%d ",(int)C[i][j]);
-    }
-    //printf("\n");
-  }
-
   }
   MPI_Barrier(MPI_COMM_WORLD);
   end = MPI_Wtime();
@@ -268,12 +228,14 @@ int main(){
     //mult_serial(A,B,C_SERIAL,RA,CA,CB);
     //double d = diff(C_SERIAL,C,RA,CB);
     //printf("diff is %f\n",d);
-  
-
+    free(C_SERIAL);
+    free(A);
+    free(B);
+    free(C);
 
 
   }
-
+  
   MPI_Finalize();
   return 0;
 }

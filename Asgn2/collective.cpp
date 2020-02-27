@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <bits/stdc++.h>
 #include <mpi.h>
-
+using namespace std;
 int min(int a , int b ){
 if (a > b )
   return b ;
@@ -36,7 +36,6 @@ void mult_block(double **A , double ** B , double ** C , int RA , int CA , int C
                     C[i][j+7]+=A[i][k]*B[k][j+7];
                     
               }
-              //C[i][j]+=lsum;
             }
           }
         }
@@ -52,8 +51,18 @@ double diff(double **A1, double **A2,int RA , int CA){
   }
   return d ;
 }
+
+void printMatrix(double **A , int RA , int CA){
+  for(int i = 0 ; i < RA ; i++){
+    for(int j = 0 ; j < CA ; j++ ){
+      cout << A[i][j] << " " ; 
+    }
+    cout << endl ;
+  }
+}
+
 int main(){
-int n = 2048;
+int n = 1024;
 
   int RA,RB,CA,CB;
   RA=RB=CA=CB=n;
@@ -127,27 +136,11 @@ int n = 2048;
   MPI_Bcast(B[0],RB*CB,MPI_DOUBLE,0,MPI_COMM_WORLD);
 
 
- //  for(int i = 0 ; i < chunk ; i++){
- //   for(int j = 0 ; j < CB ; j++){
- //     for(int k = 0 ; k < CA ; k++){
- //       C_LOCAL[i][j]+=A_LOCAL[i][k]*B[k][j];
- //     }
- //   }
- // }
   mult_block(A_LOCAL,B,C_LOCAL,chunk,RB,CB); 
+
   //Gathering output at process 0
   MPI_Gather(C_LOCAL[0],chunk*CB,MPI_DOUBLE,C[0],chunk*CB,MPI_DOUBLE,0,MPI_COMM_WORLD);
 
-
-  //printing the output
-  if (my_rank==0){
-    for(int i = 0 ; i < RA ; i++){
-      for(int j = 0 ; j < CB ; j++){
-     //     printf("%d ",(int)C[i][j]);
-      }
-     // printf("\n");
-    }
-  }
   
   MPI_Barrier(MPI_COMM_WORLD);
   end = MPI_Wtime();

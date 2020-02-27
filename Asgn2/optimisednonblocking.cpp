@@ -22,14 +22,13 @@ void mult_serial(double **A , double ** B , double ** C , int RA , int CA , int 
       }
     }
 }
-void mult_block(double **A , double ** B , double ** C , int RA , int CA , int CB){
+void mult_block(double **A , double ** B , double ** C , int RA , int CA , int CB,int p){
   int g = 16;  
-  for(int i0 = 0 ; i0 < RA ; i0+=g){
+  for(int i0 = p ; i0 < RA ; i0+=g){
       for(int j0 = 0 ; j0 < CB ; j0+=g ){
         for(int k0 = 0 ; k0 < CA; k0+=g){
           for(int i = i0 ; i < min(i0+g,RA);i++){
             for(int j =j0 ; j < min(j0+g,CB);j+=8){
-              double lsum=0;
               for(int k = k0 ; k <min(k0+g,CA);k++){    
                     C[i][j]+=A[i][k]*B[k][j];
                     C[i][j+1]+=A[i][k]*B[k][j+1];
@@ -42,7 +41,7 @@ void mult_block(double **A , double ** B , double ** C , int RA , int CA , int C
                     
               }
             }
-          }
+          }  
         }
       }
     }
@@ -67,7 +66,7 @@ void printMatrix(double **A , int RA , int CA){
 }
 
 int main(){
-  int n = 2048 ;
+  int n = 4096 ;
   int comm_sz,my_rank;
   int RA,RB,CA,CB;
   RA=RB=CA=CB=n;
@@ -110,14 +109,14 @@ int main(){
     C[i]=C[i-1]+CB;
   }
 
-  printf("A matrix \n");
+  printf("Initialising A matrix \n");
   for(int i = 0 ; i < RA ; i++){
     for(int j = 0 ; j < CA;j++){
       A[i][j]=(i+2*j)/100;
     }
   }
 
-  printf("B matrix \n");
+  printf("Initialising B matrix \n");
   for(int i = 0 ; i < RB ; i++){
     for(int j = 0 ; j < CB;j++){
       B[i][j]=(i+3*j)/100;
@@ -127,18 +126,22 @@ int main(){
     /*chunk is the number of rows each process get
      Rows are divided among all the processes equally*/
     chunk = RA/(comm_sz);
+    //printf("chunk = %d\n",chunk);
+    int numblock = chunk/16;
+    //printf("numblock=%d\n",numblock);
 
     for(int i =1;i<comm_sz;i++){
       L=(i)*chunk;
       U=L+chunk;
       MPI_Isend(&L,1,MPI_INT,i,MASTER_TO_SLAVE_TAG,MPI_COMM_WORLD,&request);
       MPI_Isend(&U,1,MPI_INT,i,MASTER_TO_SLAVE_TAG+1,MPI_COMM_WORLD,&request);
-      MPI_Isend(A[L],CA*chunk,MPI_DOUBLE,i,MASTER_TO_SLAVE_TAG+2,MPI_COMM_WORLD,&request);
-      MPI_Isend(B[0],CB*RB,MPI_DOUBLE,i,MASTER_TO_SLAVE_TAG+3,MPI_COMM_WORLD,&request);
+      MPI_Isend(B[0],CB*RB,MPI_DOUBLE,i,MASTER_TO_SLAVE_TAG+2,MPI_COMM_WORLD,&request); 
+      
+      for (int b = 0 ; b < numblock ; b++){
+        MPI_Isend(A[L+b*16],CA*16,MPI_DOUBLE,i,MASTER_TO_SLAVE_TAG+3+b,MPI_COMM_WORLD,&request);
+      }
     }
-
-   
-    mult_block(A,B,C,chunk,CA,CB); 
+    mult_block(A,B,C,chunk,CA,CB,0); 
   }
 
   else{
@@ -182,16 +185,20 @@ int main(){
     }
 
 
-
-    MPI_Irecv(A_LOCAL[0],CA*chunk,MPI_DOUBLE,0,MASTER_TO_SLAVE_TAG+2,MPI_COMM_WORLD,&A_req);
-    MPI_Irecv(B_LOCAL[0],CB*RB,MPI_DOUBLE,0,MASTER_TO_SLAVE_TAG+3,MPI_COMM_WORLD,&B_req);
+    int numblocks = chunk/16;
+    MPI_Request Areq[numblocks];
+    MPI_Irecv(B_LOCAL[0],CB*RB,MPI_DOUBLE,0,MASTER_TO_SLAVE_TAG+2,MPI_COMM_WORLD,&B_req);
     
+    for (int i = 0 ; i < numblocks ; i++){ 
+      MPI_Irecv(A_LOCAL[0+16*i],CA*16,MPI_DOUBLE,0,MASTER_TO_SLAVE_TAG+3+i,MPI_COMM_WORLD,&Areq[i]);
+    }
 
-    MPI_Wait(&A_req,NULL);
+
     MPI_Wait(&B_req,NULL);
-
-   
-    mult_block(A_LOCAL,B_LOCAL,C_LOCAL,chunk,CA,CB); 
+    for(int i = 0 ; i < numblocks;i++){ 
+      MPI_Wait(&Areq[i],NULL);
+      mult_block(A_LOCAL,B_LOCAL,C_LOCAL,16,CA,CB,i*16); 
+    }
     
     MPI_Request request;
     MPI_Isend(&Lb,1,MPI_INT,0,SLAVE_TO_MASTER_TAG,MPI_COMM_WORLD,&request);
@@ -224,9 +231,9 @@ int main(){
 
   if (my_rank==0){
 
-    //for(int i = 1 ; i < comm_sz;i++){
-      //MPI_Wait(&C_req[i],NULL);
-    //}
+    for(int i = 1 ; i < comm_sz;i++){
+      MPI_Wait(&C_req[i],NULL);
+    }
   }
 
 
@@ -252,9 +259,9 @@ int main(){
     }
   
 
-    mult_serial(A,B,C_SERIAL,RA,CA,CB);
-    double d = diff(C_SERIAL,C,RA,CB);
-     printf("diff is %f\n",d);
+    //mult_serial(A,B,C_SERIAL,RA,CA,CB);
+    //double d = diff(C_SERIAL,C,RA,CB);
+    // printf("diff is %f\n",d);
 
   }
 
