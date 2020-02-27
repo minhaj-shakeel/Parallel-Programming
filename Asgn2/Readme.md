@@ -1,10 +1,10 @@
 performance of blocking Multiplication of N*N matrix on P processors
 
-| N\P  	| 1    	| 2    	| 4     	| 8     	|
+| N\P  	| P=1    	| P=2    	| P=4     	| P=8     	|
 |------	|------	|------	|-------	|-------	|
-| 1024 	| 4.27 	| 2.23 	| 1.26  	| 1.40  	|
-| 2048 	| 35.7 	| 19.2 	| 10.54 	| 11.57 	|
-| 4096 	| 321  	| 209  	| 137   	| 117   	|
+| N=1024 	| 4.27 	| 2.23 	| 1.26  	| 1.40  	|
+| N=2048 	| 35.7 	| 19.2 	| 10.54 	| 11.57 	|
+| N=4096 	| 321  	| 209  	| 137   	| 117   	|
 
 
 performance of Collective Multiplication of N*N matrix on P processors
