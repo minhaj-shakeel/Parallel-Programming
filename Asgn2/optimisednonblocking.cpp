@@ -5,7 +5,7 @@
 
 #define MASTER_TO_SLAVE_TAG 1
 #define SLAVE_TO_MASTER_TAG 5
-#define MAX_PROC 8
+#define MAX_PROC 16
 using namespace std ;
 
 int min(int a , int b ){

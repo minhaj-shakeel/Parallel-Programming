@@ -5,7 +5,7 @@
 
 #define MASTER_TO_SLAVE_TAG 1
 #define SLAVE_TO_MASTER_TAG 5
-#define MAX_PROC 8
+#define MAX_PROC 16
 using namespace std ;
 
 int min(int a , int b ){
@@ -67,7 +67,7 @@ void printMatrix(double **A , int RA , int CA){
 }
 
 int main(){
-  int n = 2048 ;
+  int n = 4096 ;
   int comm_sz,my_rank;
   int RA,RB,CA,CB;
   RA=RB=CA=CB=n;
@@ -224,9 +224,9 @@ int main(){
 
   if (my_rank==0){
 
-    //for(int i = 1 ; i < comm_sz;i++){
-      //MPI_Wait(&C_req[i],NULL);
-    //}
+    for(int i = 1 ; i < comm_sz;i++){
+      MPI_Wait(&C_req[i],NULL);
+    }
   }
 
 
@@ -252,9 +252,9 @@ int main(){
     }
   
 
-    mult_serial(A,B,C_SERIAL,RA,CA,CB);
-    double d = diff(C_SERIAL,C,RA,CB);
-     printf("diff is %f\n",d);
+    //mult_serial(A,B,C_SERIAL,RA,CA,CB);
+    //double d = diff(C_SERIAL,C,RA,CB);
+    //printf("diff is %f\n",d);
 
   }
 

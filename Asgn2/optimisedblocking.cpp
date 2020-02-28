@@ -58,7 +58,7 @@ double diff(double **A1, double **A2,int RA , int CA){
 
 int main(){
 
-  int n = 2048;
+  int n = 1024;
   int RA,RB,CA,CB;
   RA=RB=CA=CB=n;
   double start , end ;
@@ -191,13 +191,13 @@ int main(){
     /*Slave processes receives the rows of A matrix and B matrix*/
     MPI_Recv(B_LOCAL[0],CB*RB,MPI_DOUBLE,0,MASTER_TO_SLAVE_TAG+2,MPI_COMM_WORLD,&status);
     int numblocks = chunk/16;
-    printf("B received\n");
+    //printf("B received\n");
     for (int j = 0 ; j < numblocks;j++){
       MPI_Recv(A_LOCAL[0+j*16],CA*16,MPI_DOUBLE,0,MASTER_TO_SLAVE_TAG+3+j,MPI_COMM_WORLD,&status);
       mult_block(A_LOCAL,B_LOCAL,C_LOCAL,16,CA,CB,16*j);
       
     }
-    printf("mult completed\n");
+    //printf("mult completed\n");
     /*Slave processes send their computation to Master Process 0*/
     MPI_Send(&Lb,1,MPI_INT,0,SLAVE_TO_MASTER_TAG,MPI_COMM_WORLD);
     MPI_Send(&Ub,1,MPI_INT,0,SLAVE_TO_MASTER_TAG+1,MPI_COMM_WORLD);

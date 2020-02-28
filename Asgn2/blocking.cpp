@@ -5,6 +5,7 @@
 
 #define MASTER_TO_SLAVE_TAG 1
 #define SLAVE_TO_MASTER_TAG 5
+using namespace std;
 int min(int a , int b ){
 if (a > b )
   return b ;
@@ -55,10 +56,18 @@ double diff(double **A1, double **A2,int RA , int CA){
   }
   return d ;
 }
+void printMatrix(double **A , int RA , int CA){
+  for(int i = 0 ; i < RA ; i++){
+    for(int j = 0 ; j < CA ; j++ ){
+      cout << A[i][j] << " " ; 
+    }
+    cout << endl ;
+  }
+}
 
 int main(){
 
-  int n = 1024;
+  int n = 2048;
   int RA,RB,CA,CB;
   RA=RB=CA=CB=n;
   double start , end ;

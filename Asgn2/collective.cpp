@@ -62,7 +62,7 @@ void printMatrix(double **A , int RA , int CA){
 }
 
 int main(){
-int n = 1024;
+int n = 4096;
 
   int RA,RB,CA,CB;
   RA=RB=CA=CB=n;
