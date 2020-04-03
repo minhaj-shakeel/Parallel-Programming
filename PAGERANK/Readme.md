@@ -1,4 +1,4 @@
-# Implementation of PageRank Algorithm with MapReduce Library
+# Implementation of PageRank with MapReduce
 
 
 ## Installation Instructions
