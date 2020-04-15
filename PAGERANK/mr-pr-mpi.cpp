@@ -2,6 +2,8 @@
 #include <iostream>
 #include <vector>
 #include <cstring>
+#include <unordered_map>
+#include <utility>
 
 int myrank,nprocs;
 
@@ -25,6 +27,76 @@ class KeyValue
     }
 
 };
+
+
+class KeyMultiValue
+{
+  
+  
+  public:
+    std::unordered_map<char,std::pair<int,int> > Counter;
+    std::unordered_map<char,char*> MultiValueHash;
+    void add(char *key,int keybytes,char *value,int valuebytes);
+    char* getValues(char *key,int keybytes);
+    int getValueCount(char *key , int keybytes);
+};
+
+
+class MapReduce
+{
+  public:
+    KeyValue *i_kv; // mapper stores key and value in it
+    KeyValue *agr_kv;
+    KeyMultiValue *kmv;    
+    void map(int nmap,void (*mapper)(int,KeyValue*));
+    void aggregate();
+    void convert();
+    int defaultHash(char *key);
+     
+    MapReduce(){
+      i_kv = new KeyValue();
+      agr_kv = new KeyValue();
+      kmv = new KeyMultiValue();
+    }
+
+};
+
+
+
+
+void mapper(int itask,KeyValue* kv);
+
+int main(){
+  for(int i = 0 ; i < 8 ; i++){
+    std::vector<int> v;
+    for(int j=0; j < 8 ; j++){
+      v.push_back(i+j);
+    }
+    inp.push_back(v);
+  } 
+
+
+  MPI_Init(NULL,NULL);
+  MPI_Comm_rank(MPI_COMM_WORLD,&myrank);
+  MPI_Comm_size(MPI_COMM_WORLD,&nprocs);
+  
+
+  MapReduce *mr = new MapReduce();
+  mr->map(8,mapper);
+  mr->aggregate();
+  mr->convert();
+  
+  if (myrank==1){
+    int abc=0;
+    int num = mr->kmv->getValueCount((char *)&abc,4);
+    char *varray = mr->kmv->getValues((char *)&abc,4) ;
+    for(int i = 0 ; i < num ; i++){
+      std::cout << *(int *)(varray+i*sizeof(int)) << std::endl;
+    }
+  }
+  
+  MPI_Finalize();
+}
 
 char * KeyValue::getKey(int num){
   return keyArray+num*keylength;
@@ -67,62 +139,61 @@ void KeyValue::add(char *key,int keybytes, char *value,int valuebytes){
   
   n++;
 }
-
-class MapReduce
+void KeyMultiValue::add(char *key,int keybytes,char *value,int valuebytes)
 {
-  public:
-    KeyValue *i_kv; // mapper stores key and value in it
-    KeyValue *agr_kv;
+  //first entry 
+  int n,m;
+  if (Counter.find(*key) == Counter.end()){
+    Counter[*key] = std::pair<int,int>(0,1);
+    n=0;
+    m=1;
+    MultiValueHash[*key]=(char *)malloc(valuebytes);
+  }
+  else{
+      n = Counter[*key].first ;
+      m = Counter[*key].second;
+      if (n == m){
+        char *tempArray = (char *)malloc(2*m*valuebytes);
+        memcpy(tempArray,MultiValueHash[*key],m*valuebytes);
+        m=2*m;
+        MultiValueHash[*key]=tempArray;
+      }
+  }
+  memcpy(MultiValueHash[*key]+n*valuebytes,value,valuebytes);
+  n++;
+  Counter[*key]=std::pair<int,int>(n,m);
+  return;
+}
 
-    void map(int nmap,void (*mapper)(int,KeyValue*));
-    void aggregate();
-    int defaultHash(char *key);
-    
-    MapReduce(){
-      i_kv = new KeyValue();
-      agr_kv = new KeyValue();
-    }
+int KeyMultiValue::getValueCount(char *key,int keybytes)
+{
+  return Counter[*key].first;
+}
 
-};
-
-
-
-
-
+char* KeyMultiValue::getValues(char *key,int keybytes){
+  return MultiValueHash[*key];
+}
 
 void mapper(int itask,KeyValue* kv){
-  //std::cout << itask << std::endl;
   for(int i = 0 ; i < inp[itask].size();i++){
     kv->add((char *)&itask,sizeof(int),(char *)&inp[itask][i],sizeof(int));
   }
   return ;
 }
+/*convert aggregated key value to key multivalue pair*/
 
-int main(){
-  for(int i = 0 ; i < 8 ; i++){
-    std::vector<int> v;
-    for(int j=0; j < 8 ; j++){
-      v.push_back(i+j);
-    }
-    inp.push_back(v);
-  } 
+void MapReduce::convert(){
   
-  MPI_Init(NULL,NULL);
-  MPI_Comm_rank(MPI_COMM_WORLD,&myrank);
-  MPI_Comm_size(MPI_COMM_WORLD,&nprocs);
-
-  MapReduce *mr = new MapReduce();
-  mr->map(8,mapper);
-  mr->aggregate();
-  std::cout << mr->agr_kv->getsize() << std::endl ;
-  if (myrank==1){
-      for(int i = 0 ; i < mr->agr_kv->getsize() ; i++)
-        std::cout << *(int *)(mr->agr_kv->getValue(i))  << " ";
+  int nKeys = agr_kv->getsize();
+  
+  int keybytes = agr_kv->keylength;
+  int valuebytes = agr_kv->valuelength;
+  for(int i = 0 ; i < nKeys ; i++){
+    kmv->add(agr_kv->getKey(i),keybytes,agr_kv->getValue(i),valuebytes);
   }
-
-  MPI_Finalize();
+  free(agr_kv);
+  return;
 }
-
 
 void MapReduce::map(int nmap,void (*mapper)(int,KeyValue*))
 {
@@ -177,7 +248,7 @@ void MapReduce::aggregate()
         
         int keyId = procmapper[pr][i];
        //add into own aggregate key,value pool
-        agr_kv->add(i_kv->getKey(keyId),keybytes,i_kv->getValue(keynum),valuebytes);
+        agr_kv->add(i_kv->getKey(keyId),keybytes,i_kv->getValue(keyId),valuebytes);
       }
     }
   }
@@ -200,7 +271,7 @@ void MapReduce::aggregate()
       }
 
     }
-  
+  free(i_kv); 
   return ;
 
 }
