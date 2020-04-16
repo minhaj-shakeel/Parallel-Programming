@@ -15,6 +15,8 @@ std::vector<double> initRank;
 std::vector<double> newRank;
 std::unordered_map<int,std::vector<int> > LinkMap;
 
+
+/*KeyValue class for storing intermediate key values MapReduce*/
 class KeyValue
 {
   public:
@@ -34,7 +36,7 @@ class KeyValue
 
 };
 
-
+/*Key Multivalue class for passing keys to Reducer*/
 class KeyMultiValue
 {
   
@@ -50,6 +52,7 @@ class KeyMultiValue
 };
 
 
+/*Main MapReduce Class*/
 class MapReduce
 {
   public:
@@ -73,13 +76,22 @@ class MapReduce
 
 };
 
-bool converge(std::vector<double> initRank , std::vector<double> newRank , double tolerance);
-double mod(double a);
 
-/*1st MapReduce Job*/
+/*First MapReduce Task*/
 void mymap(int itask ,KeyValue *kv);
 void myreduce(char *key, int keybytes, char *multivalue, int nvalues, int valuebytes, KeyValue *kv); 
 void output(int itask, char *key, int keybytes, char *value, int valuebytes, KeyValue *kv);
+
+/*Second MapReduce Task*/
+void dangling_mapper(int itask ,KeyValue *kv);
+void dangling_reducer(char *key,int keybytes,char *multivalue , int nvalues , int valuebytes,KeyValue *kv);
+void dangling_output(int itask,char *key,int keybytes,char *value,int valuebytes,KeyValue *kv);
+
+/*Utility functions*/
+bool converge(std::vector<double> initRank , std::vector<double> newRank , double tolerance);
+void writeToFile(std::string filename);
+double mod(double a);
+
 
 int main(int narg,char **args){
  std::ifstream inFile ;
@@ -105,8 +117,7 @@ int main(int narg,char **args){
   MPI_Comm_size(MPI_COMM_WORLD,&nprocs);
 
   int iteration = 0;
-  //while(!converge(initRank,newRank,.0001)){
-  while(true){
+  while(!converge(initRank,newRank,.0001)){
      initRank=newRank;
      MapReduce *mr = new MapReduce();
      mr->map(n,mymap);
@@ -115,24 +126,34 @@ int main(int narg,char **args){
      mr->reduce(myreduce);
      MPI_Barrier(MPI_COMM_WORLD);
 
-     mr->gather(1);
-     MPI_Barrier(MPI_COMM_WORLD);
-     mr->broadcast(1);
-     MPI_Barrier(MPI_COMM_WORLD);
+     mr->gather(0);
+     mr->broadcast(0);
 
      mr->map(mr,output);
      MPI_Barrier(MPI_COMM_WORLD);
 
-     //delete mr;
+     delete mr;
+     
+     MapReduce *mr1 = new MapReduce();
+     mr1->map(n,dangling_mapper);
+     mr1->aggregate();
+     mr1->convert();
+     mr1->reduce(dangling_reducer);
+     MPI_Barrier(MPI_COMM_WORLD);
+     
+     mr1->gather(0);
+     mr1->broadcast(0);
+
+     mr1->map(mr1,dangling_output);
+     delete mr1;
+
      iteration++;
-     if (iteration == 2)
-      break;
+
   }
-  if (myrank==0){
-      for (int i = 0 ; i < n ; i++)
-        std::cout << newRank[i] << std::endl;
-  }
- // 
+  
+  if (myrank==0)
+    writeToFile(args[2]);
+
   MPI_Finalize();
 }
 
@@ -167,7 +188,7 @@ void myreduce(char *key, int keybytes, char *multivalue, int nvalues, int valueb
 
 void output(int itask, char *key, int keybytes, char *value, int valuebytes, KeyValue *kv){
       //std::cout << *(double *)value << std::endl;
-      newRank[*(int *)key] = (*(double *)value);
+      newRank[*(int *)key] = alpha*(*(double *)value);
 
 }
 
@@ -181,6 +202,42 @@ bool converge(std::vector<double> initRank , std::vector<double> newRank , doubl
     }
     return true;
       
+}
+
+/*Mapper Function for Calculation of Dot Product of Dangling page vector and Initial PageRank
+ * Returns (1,p_i) if page i is dangling */
+void dangling_mapper(int itask ,KeyValue *kv)
+{
+  double drank = 0;
+  int dKey =0 ; /*Sends all the non zero dot product entries to single reducer*/
+  /*Send atleast 1 key for safety purpose*/
+  if (itask==1){
+    kv->add((char *)&dKey,sizeof(int),(char *)&drank,sizeof(double));
+  }
+  if (LinkMap[itask].size()==0){
+    drank = initRank[itask];
+    kv->add((char *)&dKey,sizeof(int),(char *)&drank,sizeof(double));
+  }
+}
+
+/*Reducer sums up the individual entries of dot product */
+void dangling_reducer(char *key,int keybytes,char *multivalue , int nvalues , int valuebytes,KeyValue *kv)
+{
+  double dot_product = 0;
+  for(int i = 0 ; i < nvalues ; i++){
+    double e = *(double *)(multivalue+i*(valuebytes));
+    dot_product+=e;
+  }
+
+  kv->add(key,sizeof(int),(char *)&dot_product,sizeof(double));
+}
+
+/*updates the newRank vector */
+void dangling_output(int itask,char *key,int keybytes,char *value,int valuebytes,KeyValue *kv)
+{
+  for(int i = 0 ; i < n;i++){
+    newRank[i]+=alpha*(*(double *)value/n)+(1-alpha)*(1.0/n);
+  } 
 }
 
 double mod(double a){
@@ -216,7 +273,6 @@ void MapReduce::aggregate()
   int nkeys = i_kv->getsize();
   int keybytes = i_kv->keylength;
   int valuebytes = i_kv->valuelength;
- 
   //Stores the mapping of key to process
   std::vector<std::vector<int> > procmapper(nprocs,std::vector<int>(0));
   for(int i = 0 ; i < nkeys;i++){
@@ -234,6 +290,8 @@ void MapReduce::aggregate()
     if( pr!=myrank){
       //first send the number of key,value of pairs to be send
       MPI_Send(&key_count,1,MPI_INT,pr,0,MPI_COMM_WORLD);
+      MPI_Send(&keybytes,1,MPI_INT,pr,0,MPI_COMM_WORLD);
+      MPI_Send(&valuebytes,1,MPI_INT,pr,0,MPI_COMM_WORLD);
       for(int i = 0 ; i < key_count ; i++){
         int keyId = procmapper[pr][i];
         //send the key value in blocking fashion
@@ -253,6 +311,7 @@ void MapReduce::aggregate()
         agr_kv->add(i_kv->getKey(keyId),keybytes,i_kv->getValue(keyId),valuebytes);
       }
     }
+ 
   }
 
   //Receiving Key Values from other processes
@@ -264,15 +323,17 @@ void MapReduce::aggregate()
     for(int rproc = 0 ; rproc  < nprocs ; rproc++ ){
       if (rproc!=myrank){
         MPI_Recv(&to_recv,1,MPI_INT,rproc,0,MPI_COMM_WORLD,NULL);
+        MPI_Recv(&keybytes,1,MPI_INT,rproc,0,MPI_COMM_WORLD,NULL);
+        MPI_Recv(&valuebytes,1,MPI_INT,rproc,0,MPI_COMM_WORLD,NULL);
         for(int j = 0 ; j < to_recv ; j++){
           MPI_Recv(keyBuffer,keybytes,MPI_CHAR,rproc,j,MPI_COMM_WORLD,NULL);
           MPI_Recv(valueBuffer,valuebytes,MPI_CHAR,rproc,j+to_recv,MPI_COMM_WORLD,NULL);
-          
           agr_kv->add(keyBuffer,keybytes,valueBuffer,valuebytes);
         }
       }
 
     }
+  
   free(i_kv); 
   return ;
 
@@ -309,13 +370,17 @@ int MapReduce::defaultHash(char *key){
 /* Gathers all key value pairs to one process */
 void MapReduce::gather(int pid){
   
+  int key_count = i_kv->getsize();
   int keybytes = i_kv->keylength;
   int valuebytes = i_kv->valuelength;
- 
+  
+  
   if (myrank!=pid){
-     int key_count = i_kv->getsize();
 
      MPI_Send(&key_count,1,MPI_INT,pid,0,MPI_COMM_WORLD);
+     MPI_Send(&keybytes,1,MPI_INT,pid,0,MPI_COMM_WORLD);
+     MPI_Send(&valuebytes,1,MPI_INT,pid,0,MPI_COMM_WORLD);
+    
      for(int i = 0 ; i < key_count ; i++){
        MPI_Send(i_kv->getKey(i),keybytes,MPI_CHAR,pid,i,MPI_COMM_WORLD);
        MPI_Send(i_kv->getValue(i),valuebytes,MPI_CHAR,pid,i+key_count,MPI_COMM_WORLD);
@@ -324,15 +389,19 @@ void MapReduce::gather(int pid){
 
   else{
     //target Process gather all the key values
-      char *keyBuffer = (char*)malloc(keybytes);
-      char *valueBuffer = (char*)malloc(valuebytes);
-      int to_recv;
+      
       for(int rproc = 0 ; rproc < nprocs ; rproc++){
       if (rproc!=pid){
-        MPI_Recv(&to_recv,1,MPI_INT,rproc,0,MPI_COMM_WORLD,NULL);
-        for(int j = 0 ; j < to_recv ; j++){
+        MPI_Recv(&key_count,1,MPI_INT,rproc,0,MPI_COMM_WORLD,NULL);
+        MPI_Recv(&keybytes,1,MPI_INT,rproc,0,MPI_COMM_WORLD,NULL);
+        MPI_Recv(&valuebytes,1,MPI_INT,rproc,0,MPI_COMM_WORLD,NULL);
+        
+        char *keyBuffer = (char*)malloc(keybytes);
+        char *valueBuffer = (char*)malloc(valuebytes);
+
+        for(int j = 0 ;j < key_count ; j++){
           MPI_Recv(keyBuffer,keybytes,MPI_CHAR,rproc,j,MPI_COMM_WORLD,NULL);
-          MPI_Recv(valueBuffer,valuebytes,MPI_CHAR,rproc,j+to_recv,MPI_COMM_WORLD,NULL);
+          MPI_Recv(valueBuffer,valuebytes,MPI_CHAR,rproc,j+key_count,MPI_COMM_WORLD,NULL);
           i_kv->add(keyBuffer,keybytes,valueBuffer,valuebytes);
         }
       }
@@ -344,52 +413,39 @@ void MapReduce::gather(int pid){
 /*Broadcast all key values from given process to all the process*/
 void MapReduce::broadcast(int pid){
   
-  int keybytes ;
-  int valuebytes ;
-  int key_count ;
-  if (myrank==pid){
-    
-    keybytes = i_kv->keylength;
-    valuebytes = i_kv->valuelength;
-    key_count = i_kv->getsize();
-    std::cout << key_count << std::endl;
-    
-    /*Broadcasting kv metadata*/
-    MPI_Bcast(&key_count,1,MPI_INT,pid,MPI_COMM_WORLD);
-    MPI_Bcast(&keybytes,1,MPI_INT,pid,MPI_COMM_WORLD);
-    MPI_Bcast(&valuebytes,1,MPI_INT,pid,MPI_COMM_WORLD);
-    
-    /*Broadcasting Pointer to Key,Value array*/
-    MPI_Bcast(i_kv->getKey(0),keybytes*key_count,MPI_CHAR,pid,MPI_COMM_WORLD);
-    MPI_Bcast(i_kv->getValue(0),valuebytes*key_count,MPI_CHAR,pid,MPI_COMM_WORLD);
+  int keybytes = i_kv->keylength;
+  int valuebytes = i_kv->valuelength;
+  int key_count = i_kv->getsize();
+  
+  /*Broadcasting kv metadata*/
+  MPI_Bcast(&key_count,1,MPI_INT,pid,MPI_COMM_WORLD);
+  MPI_Bcast(&keybytes,1,MPI_INT,pid,MPI_COMM_WORLD);
+  MPI_Bcast(&valuebytes,1,MPI_INT,pid,MPI_COMM_WORLD);
+  
+  char *keyBuffer = (char*)malloc(key_count*keybytes);
+  char *valueBuffer = (char*)malloc(key_count*valuebytes);
+  memcpy(keyBuffer,i_kv->getKey(0),key_count*keybytes);
+  memcpy(valueBuffer,i_kv->getValue(0),key_count*valuebytes);
+  //keyBuffer = i_kv->getKey(0);
+  //valueBuffer = i_kv->getKey(0);
+  /*Broadcasting Pointer to Key,Value array*/
+  MPI_Bcast(keyBuffer,keybytes*key_count,MPI_CHAR,pid,MPI_COMM_WORLD);
+  MPI_Bcast(valueBuffer,valuebytes*key_count,MPI_CHAR,pid,MPI_COMM_WORLD);
 
-  }
-  else{
-    char *keyBuffer = (char*)malloc(key_count*keybytes);
-    char *valueBuffer = (char*)malloc(key_count*valuebytes);
 
-    MPI_Bcast(&key_count,1,MPI_INT,pid,MPI_COMM_WORLD);
-    MPI_Bcast(&keybytes,1,MPI_INT,pid,MPI_COMM_WORLD);
-    MPI_Bcast(&valuebytes,1,MPI_INT,pid,MPI_COMM_WORLD);
-    
-    MPI_Bcast(keyBuffer,keybytes*key_count,MPI_CHAR,pid,MPI_COMM_WORLD);
-    MPI_Bcast(valueBuffer,valuebytes*key_count,MPI_CHAR,pid,MPI_COMM_WORLD);
-    
+  if (myrank!=pid){
     /*Deleting all the existing key values*/
     free(i_kv);
-    i_kv=new KeyValue();
-    
+    i_kv=new KeyValue(); 
     /*Inserting all the received key values one by one 
      * Can be optimised by multiadding*/
-
     for(int i = 0 ; i < key_count ; i++){
       i_kv->add(keyBuffer+i*keybytes,keybytes,valueBuffer+i*valuebytes,valuebytes);
     }
-    
-    free(keyBuffer);
-    free(valueBuffer);
-
   }
+  
+  free(keyBuffer);
+  free(valueBuffer);
   return ;
 }
 
@@ -476,3 +532,14 @@ char* KeyMultiValue::getValues(char *key,int keybytes){
   return MultiValueHash[*(int *)key];
 }
 
+void writeToFile(std::string filename){
+  std::ofstream outfile;
+  outfile.open(filename);
+  double sum =0 ;
+  for(int i = 0 ; i < n ; i++){
+    sum+=newRank[i];
+    outfile << newRank[i] << std::endl;
+  }
+  outfile << "sum= " << sum << std::endl;
+  outfile.close();
+}
