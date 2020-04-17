@@ -169,7 +169,6 @@ int main(int argc , char **argv){
   int a,b;
 
   while(inFile >> a >> b ){
-      a--;b--;
       n=std::max(b,std::max(a,n));
       pageRank:: LinkMap[a].push_back(b);
   }
