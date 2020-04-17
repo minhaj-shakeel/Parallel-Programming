@@ -1,3 +1,7 @@
+mrmpi-7Apr14
+random/
+results/
+mapreduce/
 test/
 *.o
 *.out
