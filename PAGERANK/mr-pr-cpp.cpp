@@ -17,8 +17,8 @@
 #include <utility>
 #include <numeric>
 #include <unordered_map>
-
-
+#include <time.h>
+#include <chrono>
 namespace pageRank{
 
   std::vector<std::vector<int> > Edges ;
@@ -146,7 +146,7 @@ void writeToFile(std::string filename){
   double sum =0 ;
   for(int i = 0 ; i < pageRank::newRank.size() ; i++){
     sum+=pageRank::newRank[i];
-    outfile << pageRank::newRank[i] << std::endl;
+    outfile << i << " = " << pageRank::newRank[i] << std::endl;
   }
   outfile << "sum= " << sum << std::endl;
   outfile.close();
@@ -165,14 +165,14 @@ int main(int argc , char **argv){
   inFile.open(argv[1]);
   int n,links;
   n=0;
-  //Pages are numbered from 1 to n and not from 0 to n-1
+  //Pages are numbered from  0 to n-1
   int a,b;
 
   while(inFile >> a >> b ){
       n=std::max(b,std::max(a,n));
       pageRank:: LinkMap[a].push_back(b);
   }
-  n++;
+  n++; //number of pages = Max rank of page+1
   
   pageRank::alpha = .85;
 
@@ -183,14 +183,15 @@ int main(int argc , char **argv){
   //Storing the Edges 
 
   int iteration = 0; //to store the number of count till convergence
-  while(!converge(pageRank::initRank,pageRank::newRank,.0001)){
+  auto start = std::chrono::high_resolution_clock::now();
+  while(!converge(pageRank::initRank,pageRank::newRank,.0001/n)){
      iteration++;
      pageRank::initRank = pageRank::newRank;
      mapreduce::specification spec;
      pageRank::job1::datasource_type datasource1(n);
      pageRank::job2::datasource_type datasource2(n);
-     spec.map_tasks = 1;
-     spec.reduce_tasks=std::max(1U,std::thread::hardware_concurrency());
+     spec.map_tasks =n;
+     spec.reduce_tasks=n;
 
      pageRank::job1 job1(datasource1,spec);
      pageRank::job2 job2(datasource2,spec);
@@ -198,22 +199,22 @@ int main(int argc , char **argv){
      mapreduce::results result1;
      mapreduce::results result2;
   
-   # ifdef _DEBUG 
-     job1.run<mapreduce::schedule_policy::sequential<pageRank::job1> >(result1);
-   # else 
+  //# ifdef _DEBUG 
+    // job1.run<mapreduce::schedule_policy::sequential<pageRank::job1> >(result1);
+  //# else 
      job1.run<mapreduce::schedule_policy::cpu_parallel<pageRank::job1> >(result1);
-   # endif
+  // # endif
      
      for(auto it=job1.begin_results();it!=job1.end_results();++it)
      {
        pageRank::newRank[it->first]=pageRank::alpha*(it->second);
      }
      
-   # ifdef _DEBUG 
-     job2.run<mapreduce::schedule_policy::sequential<pageRank::job2> >(result2);
-   # else 
+  // # ifdef _DEBUG 
+    // job2.run<mapreduce::schedule_policy::sequential<pageRank::job2> >(result2);
+  // # else 
      job2.run<mapreduce::schedule_policy::cpu_parallel<pageRank::job2> >(result2);
-   # endif
+  // # endif
    
 
      for(auto it=job2.begin_results();it!=job2.end_results();++it)
@@ -224,12 +225,16 @@ int main(int argc , char **argv){
   
      }
 
-  }
   std::cout << "Number of iterations " << iteration << std::endl;
-  
-  for(int i = 0 ; i < n ; i++){
-    std::cout << "Page " <<  i+1 << " " <<  pageRank::newRank[i] << std::endl;
+  auto end = std::chrono::high_resolution_clock::now();
+  double time_taken =std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+  std::cout << "time " << time_taken << std::endl;
   }
+  //std::cout << "Number of iterations " << iteration << std::endl;
+  
+  //for(int i = 0 ; i < n ; i++){
+    //std::cout << "Page " <<  i+1 << " " <<  pageRank::newRank[i] << std::endl;
+  //}
   writeToFile(argv[2]); 
 }
 

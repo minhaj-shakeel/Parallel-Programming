@@ -7,10 +7,8 @@
 #include <vector>
 #include <fstream>
 #include <unordered_map>
+
 using namespace MAPREDUCE_NS;
-
-
-
 
 
 int myrank,nprocs;
@@ -70,7 +68,7 @@ int main(int narg,char ** args)
 
   int iteration=0;
   int nkeys;
-  while(!converge(initRank,newRank,.0001)){
+  while(!converge(initRank,newRank,.0001/n)){
      initRank=newRank;
 
      /*Calculation of Matrix Multiplication*/
@@ -98,6 +96,8 @@ int main(int narg,char ** args)
      delete mr1;
      
      iteration++;
+     if (myrank==0)
+      std::cout << "iteration " << iteration << std::endl;
   }
   
   MPI_Barrier(MPI_COMM_WORLD);
@@ -105,8 +105,9 @@ int main(int narg,char ** args)
 
   if (myrank==0){
    writeToFile(args[2]);
-   for(int i = 0 ; i < n ; i++)
-     std::cout << "Page " << i << " " <<  newRank[i] << std::endl;
+    std::cout << (tstop-tstart)*1000 << std::endl;
+   //  for(int i = 0 ; i < n ; i++)
+   //  std::cout << "Page " << i << " " <<  newRank[i] << std::endl;
   }
   
 
@@ -221,7 +222,7 @@ void writeToFile(std::string filename){
   double sum =0 ;
   for(int i = 0 ; i < n ; i++){
     sum+=newRank[i];
-    outfile << newRank[i] << std::endl;
+    outfile << i << " = " << newRank[i] << std::endl;
   }
   outfile << "sum= " << sum << std::endl;
   outfile.close();

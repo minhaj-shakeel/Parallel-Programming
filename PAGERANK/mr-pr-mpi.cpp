@@ -39,16 +39,14 @@ class KeyValue
 /*Key Multivalue class for passing keys to Reducer*/
 class KeyMultiValue
 {
-  
-  
   public:
     int keybytes;
     int valuebytes;
     std::unordered_map<int,std::pair<int,int> > Counter;
     std::unordered_map<int,char*> MultiValueHash;
-    void add(char *key,int keybytes,char *value,int valuebytes);
-    char* getValues(char *key,int keybytes);
-    int getValueCount(char *key , int keybytes);
+    void add(int *key,int keybytes,char *value,int valuebytes);
+    char* getValues(int *key,int keybytes);
+    int getValueCount(int *key , int keybytes);
 };
 
 
@@ -102,7 +100,6 @@ int main(int narg,char **args){
  int a,b;
  n=0;
  while(inFile>> a >> b ){
-     a--;b--; 
      n=std::max(b,std::max(a,n));
      LinkMap[a].push_back(b);
  }
@@ -116,8 +113,9 @@ int main(int narg,char **args){
   MPI_Comm_rank(MPI_COMM_WORLD,&myrank);
   MPI_Comm_size(MPI_COMM_WORLD,&nprocs);
 
+  double tstart = MPI_Wtime();
   int iteration = 0;
-  while(!converge(initRank,newRank,.0001)){
+  while(!converge(initRank,newRank,.0001/n)){
      initRank=newRank;
      MapReduce *mr = new MapReduce();
      mr->map(n,mymap);
@@ -128,7 +126,7 @@ int main(int narg,char **args){
 
      mr->gather(0);
      mr->broadcast(0);
-
+     MPI_Barrier(MPI_COMM_WORLD);
      mr->map(mr,output);
      MPI_Barrier(MPI_COMM_WORLD);
 
@@ -143,17 +141,21 @@ int main(int narg,char **args){
      
      mr1->gather(0);
      mr1->broadcast(0);
-
+     MPI_Barrier(MPI_COMM_WORLD);
      mr1->map(mr1,dangling_output);
      delete mr1;
-
      iteration++;
 
+     if (myrank==0)
+      std::cout << "iteration " << iteration << std::endl;
   }
-  
-  if (myrank==0)
-    writeToFile(args[2]);
+  MPI_Barrier(MPI_COMM_WORLD);
+  double tstop = MPI_Wtime();
 
+  if (myrank==0){
+    std::cout << (tstop-tstart)*1000 << std::endl;
+    writeToFile(args[2]);
+  }
   MPI_Finalize();
 }
 
@@ -180,8 +182,9 @@ void myreduce(char *key, int keybytes, char *multivalue, int nvalues, int valueb
 {
   double sum = 0;
   for(int i = 0 ; i < nvalues ; i++){
-      double r = *(double *)(multivalue+i*(valuebytes));
-      sum+=r;
+     
+    double r = *(double *)(multivalue+i*(valuebytes));
+    sum+=r;
   }
   kv->add(key,keybytes,(char *)&sum,sizeof(double));
 }
@@ -315,10 +318,9 @@ void MapReduce::aggregate()
   }
 
   //Receiving Key Values from other processes
-
     char *keyBuffer = (char *)malloc(keybytes);
     char *valueBuffer = (char *)malloc(valuebytes);
-    int to_recv;
+    int to_recv; //number of keys to receive
     
     for(int rproc = 0 ; rproc  < nprocs ; rproc++ ){
       if (rproc!=myrank){
@@ -343,12 +345,13 @@ void MapReduce::aggregate()
 void MapReduce::convert(){
   
   int nKeys = agr_kv->getsize();
-  
+   
   int keybytes = agr_kv->keylength;
   int valuebytes = agr_kv->valuelength;
   for(int i = 0 ; i < nKeys ; i++){
-    kmv->add(agr_kv->getKey(i),keybytes,agr_kv->getValue(i),valuebytes);
+    kmv->add((int *)agr_kv->getKey(i),keybytes,agr_kv->getValue(i),valuebytes);
   }
+  
   free(agr_kv);
   return;
 }
@@ -363,8 +366,8 @@ void MapReduce::reduce(void (*reducer)(char*,int,char*,int,int,KeyValue*)){
     } 
 }
 
-int MapReduce::defaultHash(char *key){
-    return (*key%nprocs+1)%nprocs;
+int MapReduce::defaultHash(char* key){
+    return (*(int *)key%nprocs);
 }
 
 /* Gathers all key value pairs to one process */
@@ -421,11 +424,12 @@ void MapReduce::broadcast(int pid){
   MPI_Bcast(&key_count,1,MPI_INT,pid,MPI_COMM_WORLD);
   MPI_Bcast(&keybytes,1,MPI_INT,pid,MPI_COMM_WORLD);
   MPI_Bcast(&valuebytes,1,MPI_INT,pid,MPI_COMM_WORLD);
-  
   char *keyBuffer = (char*)malloc(key_count*keybytes);
   char *valueBuffer = (char*)malloc(key_count*valuebytes);
-  memcpy(keyBuffer,i_kv->getKey(0),key_count*keybytes);
-  memcpy(valueBuffer,i_kv->getValue(0),key_count*valuebytes);
+  if (myrank==pid){
+    memcpy(keyBuffer,i_kv->getKey(0),key_count*keybytes);
+    memcpy(valueBuffer,i_kv->getValue(0),key_count*valuebytes);
+  }
   //keyBuffer = i_kv->getKey(0);
   //valueBuffer = i_kv->getKey(0);
   /*Broadcasting Pointer to Key,Value array*/
@@ -495,17 +499,17 @@ void KeyValue::add(char *key,int keybytes, char *value,int valuebytes){
 }
 
 /*KeyMultivalue Class*/
-void KeyMultiValue::add(char *key,int keybytes_,char *value,int valuebytes_)
+void KeyMultiValue::add(int *key,int keybytes_,char *value,int valuebytes_)
 {
   //first entry 
   int n,m;
   if (Counter.find(*key) == Counter.end()){
     keybytes=keybytes_;
     valuebytes=valuebytes_;
-    Counter[*(int *)key] = std::pair<int,int>(0,1);
+    Counter[*key] = std::pair<int,int>(0,1);
     n=0;
     m=1;
-    MultiValueHash[*(int *)key]=(char *)malloc(valuebytes);
+    MultiValueHash[*key]=(char *)malloc(valuebytes);
   }
   else{
       n = Counter[*key].first ;
@@ -517,19 +521,22 @@ void KeyMultiValue::add(char *key,int keybytes_,char *value,int valuebytes_)
         MultiValueHash[*(int *)key]=tempArray;
       }
   }
-  memcpy(MultiValueHash[*(int *)key]+n*valuebytes_,value,valuebytes);
+  
+  memcpy(MultiValueHash[*key]+n*valuebytes_,value,valuebytes);
+  
   n++;
-  Counter[*(int *)key]=std::pair<int,int>(n,m);
+
+  Counter[*key]=std::pair<int,int>(n,m);
   return;
 }
 
-int KeyMultiValue::getValueCount(char *key,int keybytes)
+int KeyMultiValue::getValueCount(int *key,int keybytes)
 {
-  return Counter[*(int *)key].first;
+  return Counter[*key].first;
 }
 
-char* KeyMultiValue::getValues(char *key,int keybytes){
-  return MultiValueHash[*(int *)key];
+char* KeyMultiValue::getValues(int *key,int keybytes){
+  return MultiValueHash[*key];
 }
 
 void writeToFile(std::string filename){
@@ -538,7 +545,7 @@ void writeToFile(std::string filename){
   double sum =0 ;
   for(int i = 0 ; i < n ; i++){
     sum+=newRank[i];
-    outfile << newRank[i] << std::endl;
+    outfile << i << " = " << newRank[i] << std::endl;
   }
   outfile << "sum= " << sum << std::endl;
   outfile.close();
